@@ -3,19 +3,52 @@ import pandas as pd
 from typing import List, Dict, Any
 from langchain_community.document_loaders import DataFrameLoader
 from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
+from langchain_community.vectorstores import Qdrant
 from langchain.schema import Document
-from config import FAISS_INDEX_PATH, OPENAI_API_KEY
+from config import OPENAI_API_KEY
+from qdrant_client import QdrantClient
+from qdrant_client.http import models
 
 class VectorStore:
     def __init__(self):
         self.embeddings = OpenAIEmbeddings(api_key=OPENAI_API_KEY)
-        self.index_name = 'employee_index'
-        self.index_path = os.path.join(FAISS_INDEX_PATH, self.index_name)
+        self.collection_name = 'employee_index'
+        # Initialize Qdrant client
+        self.client = QdrantClient(host="localhost", port=6333)
         self.vectorstore = None
+        self._init_collection()
+
+    def _init_collection(self):
+        """Initialize or get existing collection"""
+        try:
+            # Get vector size from embeddings
+            vector_size = len(self.embeddings.embed_query("test"))
+            
+            # Create collection if it doesn't exist
+            collections = self.client.get_collections().collections
+            collection_names = [collection.name for collection in collections]
+            
+            if self.collection_name not in collection_names:
+                self.client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=models.VectorParams(
+                        size=vector_size,
+                        distance=models.Distance.COSINE
+                    )
+                )
+            
+            # Initialize vectorstore
+            self.vectorstore = Qdrant(
+                client=self.client,
+                collection_name=self.collection_name,
+                embeddings=self.embeddings
+            )
+        except Exception as e:
+            print(f"Error initializing collection: {str(e)}")
+            raise
 
     def create_index_from_excel(self, file_path: str) -> bool:
-        """Create FAISS index from Excel file"""
+        """Create Qdrant index from Excel file"""
         try:
             # Read Excel file
             df = pd.read_excel(file_path)
@@ -30,22 +63,25 @@ class VectorStore:
             loader = DataFrameLoader(df, page_content_column="combined_content")
             documents = loader.load()
             
-            # Create and save FAISS index
-            self.vectorstore = FAISS.from_documents(documents, self.embeddings)
-            self.vectorstore.save_local(self.index_path)
+            # Add documents to Qdrant
+            self.vectorstore.add_documents(documents)
             return True
         except Exception as e:
             print(f"Error creating index: {str(e)}")
             return False
 
     def load_index(self) -> bool:
-        """Load existing FAISS index"""
+        """Load existing Qdrant index"""
         try:
-            if os.path.exists(self.index_path):
-                self.vectorstore = FAISS.load_local(
-                    self.index_path, 
-                    self.embeddings,
-                    allow_dangerous_deserialization=True
+            # Check if collection exists
+            collections = self.client.get_collections().collections
+            collection_names = [collection.name for collection in collections]
+            
+            if self.collection_name in collection_names:
+                self.vectorstore = Qdrant(
+                    client=self.client,
+                    collection_name=self.collection_name,
+                    embeddings=self.embeddings
                 )
                 return True
             return False
