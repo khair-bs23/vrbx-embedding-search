@@ -62,17 +62,47 @@ async def upload_excel(file: UploadFile = File(...)):
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
+@app.post("/upload-markdown")
+async def upload_markdown(file: UploadFile = File(...)):
+    """Upload Markdown file and create index"""
+    if not file.filename.endswith('.md'):
+        raise HTTPException(status_code=400, detail="Only Markdown files are allowed")
+    
+    # Save uploaded file temporarily
+    temp_path = f"temp_{file.filename}"
+    try:
+        with open(temp_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        # Create index from Markdown file
+        success = vector_store.create_index_from_markdown(temp_path)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to create markdown index")
+        
+        logger.info(f"Successfully processed Markdown file: {file.filename}")
+        return {"message": "Markdown file processed and index created successfully"}
+    except Exception as e:
+        logger.error(f"Error processing Markdown file {file.filename}: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        # Clean up temporary file
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
 @app.post("/search")
 async def search(request: SearchRequest) -> List[Dict[str, Any]]:
     """Search the vector store"""
     query = request.query
     k = request.k
+    collection_type = request.collection_type if hasattr(request, 'collection_type') else 'employee'
+    
     try:
         # Log the search query
-        logger.info(f"Search query received: '{query}' with k={k}")
+        logger.info(f"Search query received: '{query}' with k={k} in collection={collection_type}")
         
         # Get search results
-        results = vector_store.search(query, k=k)
+        results = vector_store.search(query, k=k, collection_type=collection_type)
         
         # Log the number of results
         logger.info(f"Found {len(results)} results for query: '{query}'")
