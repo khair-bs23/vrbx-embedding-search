@@ -1,13 +1,14 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import os
 from database import VectorStore
 # from pyngrok import ngrok # Remove ngrok import
 import uvicorn
 import logging
 from datetime import datetime
-from models import SearchRequest # Import the new model
+from models import SearchRequest, WebpageRequest
+from pydantic import BaseModel, HttpUrl
 
 # Configure logging
 logging.basicConfig(
@@ -114,6 +115,21 @@ async def search(request: SearchRequest) -> List[Dict[str, Any]]:
         return results
     except Exception as e:
         logger.error(f"Error processing search query '{query}': {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/load-webpage")
+async def load_webpage(request: WebpageRequest):
+    """Load or update webpage content in the vector store"""
+    try:
+        # Create or update index from webpage
+        success = vector_store.create_index_from_webpage(str(request.url))
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update webpage content")
+        
+        logger.info(f"Successfully updated webpage content: {request.url}")
+        return {"message": "Webpage content updated successfully"}
+    except Exception as e:
+        logger.error(f"Error updating webpage {request.url}: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
